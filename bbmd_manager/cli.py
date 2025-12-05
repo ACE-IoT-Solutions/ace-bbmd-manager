@@ -263,59 +263,58 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
     if ":" not in target:
         target = f"{target}:47808"
 
+    click.echo("Reading current BDT state from devices...")
+
+    # Read live BDT data from devices
+    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        try:
+            # Read source BBMD
+            click.echo(f"  Reading {source}...")
+            source_bbmd = client.read_bdt(source)
+            ctx.network.bbmds[source] = source_bbmd
+
+            # Read target BBMD if bidirectional
+            if bidirectional:
+                click.echo(f"  Reading {target}...")
+                target_bbmd = client.read_bdt(target)
+                ctx.network.bbmds[target] = target_bbmd
+
+        except BBMDClientError as e:
+            raise click.ClickException(f"Failed to read BDT: {e}")
+
     # Build the change plan
     changes = []
 
     # Check source BBMD
-    if source in ctx.network.bbmds:
-        source_bbmd = ctx.network.bbmds[source]
-        current_entries = [e.address for e in source_bbmd.bdt]
-        if target not in current_entries:
-            new_entries = current_entries + [target]
-            changes.append({
-                "bbmd": source,
-                "action": "add_entry",
-                "current_bdt": current_entries,
-                "new_bdt": new_entries,
-                "adding": target
-            })
-        else:
-            click.echo(f"Note: {source} already has link to {target}")
-    else:
-        click.echo(f"Warning: {source} not in cached network state. Will attempt to add link anyway.")
+    source_bbmd = ctx.network.bbmds[source]
+    current_entries = [e.address for e in source_bbmd.bdt]
+    if target not in current_entries:
+        new_entries = current_entries + [target]
         changes.append({
             "bbmd": source,
             "action": "add_entry",
-            "current_bdt": ["(unknown - not in cache)"],
-            "new_bdt": ["(will add entry)"],
+            "current_bdt": current_entries,
+            "new_bdt": new_entries,
             "adding": target
         })
+    else:
+        click.echo(f"Note: {source} already has link to {target}")
 
     # Check target BBMD for bidirectional
     if bidirectional:
-        if target in ctx.network.bbmds:
-            target_bbmd = ctx.network.bbmds[target]
-            current_entries = [e.address for e in target_bbmd.bdt]
-            if source not in current_entries:
-                new_entries = current_entries + [source]
-                changes.append({
-                    "bbmd": target,
-                    "action": "add_entry",
-                    "current_bdt": current_entries,
-                    "new_bdt": new_entries,
-                    "adding": source
-                })
-            else:
-                click.echo(f"Note: {target} already has link to {source}")
-        else:
-            click.echo(f"Warning: {target} not in cached network state. Will attempt to add link anyway.")
+        target_bbmd = ctx.network.bbmds[target]
+        current_entries = [e.address for e in target_bbmd.bdt]
+        if source not in current_entries:
+            new_entries = current_entries + [source]
             changes.append({
                 "bbmd": target,
                 "action": "add_entry",
-                "current_bdt": ["(unknown - not in cache)"],
-                "new_bdt": ["(will add entry)"],
+                "current_bdt": current_entries,
+                "new_bdt": new_entries,
                 "adding": source
             })
+        else:
+            click.echo(f"Note: {target} already has link to {source}")
 
     if not changes:
         click.echo("No changes needed - links already exist.")
@@ -401,45 +400,58 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
     if ":" not in target:
         target = f"{target}:47808"
 
+    click.echo("Reading current BDT state from devices...")
+
+    # Read live BDT data from devices
+    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        try:
+            # Read source BBMD
+            click.echo(f"  Reading {source}...")
+            source_bbmd = client.read_bdt(source)
+            ctx.network.bbmds[source] = source_bbmd
+
+            # Read target BBMD if bidirectional
+            if bidirectional:
+                click.echo(f"  Reading {target}...")
+                target_bbmd = client.read_bdt(target)
+                ctx.network.bbmds[target] = target_bbmd
+
+        except BBMDClientError as e:
+            raise click.ClickException(f"Failed to read BDT: {e}")
+
     # Build the change plan
     changes = []
 
     # Check source BBMD
-    if source in ctx.network.bbmds:
-        source_bbmd = ctx.network.bbmds[source]
-        current_entries = [e.address for e in source_bbmd.bdt]
-        if target in current_entries:
-            new_entries = [e for e in current_entries if e != target]
-            changes.append({
-                "bbmd": source,
-                "action": "remove_entry",
-                "current_bdt": current_entries,
-                "new_bdt": new_entries,
-                "removing": target
-            })
-        else:
-            click.echo(f"Note: {source} does not have link to {target}")
+    source_bbmd = ctx.network.bbmds[source]
+    current_entries = [e.address for e in source_bbmd.bdt]
+    if target in current_entries:
+        new_entries = [e for e in current_entries if e != target]
+        changes.append({
+            "bbmd": source,
+            "action": "remove_entry",
+            "current_bdt": current_entries,
+            "new_bdt": new_entries,
+            "removing": target
+        })
     else:
-        raise click.ClickException(f"{source} not in cached network state. Run 'walk' or 'read' first.")
+        click.echo(f"Note: {source} does not have link to {target}")
 
     # Check target BBMD for bidirectional
     if bidirectional:
-        if target in ctx.network.bbmds:
-            target_bbmd = ctx.network.bbmds[target]
-            current_entries = [e.address for e in target_bbmd.bdt]
-            if source in current_entries:
-                new_entries = [e for e in current_entries if e != source]
-                changes.append({
-                    "bbmd": target,
-                    "action": "remove_entry",
-                    "current_bdt": current_entries,
-                    "new_bdt": new_entries,
-                    "removing": source
-                })
-            else:
-                click.echo(f"Note: {target} does not have link to {source}")
+        target_bbmd = ctx.network.bbmds[target]
+        current_entries = [e.address for e in target_bbmd.bdt]
+        if source in current_entries:
+            new_entries = [e for e in current_entries if e != source]
+            changes.append({
+                "bbmd": target,
+                "action": "remove_entry",
+                "current_bdt": current_entries,
+                "new_bdt": new_entries,
+                "removing": source
+            })
         else:
-            raise click.ClickException(f"{target} not in cached network state. Run 'walk' or 'read' first.")
+            click.echo(f"Note: {target} does not have link to {source}")
 
     if not changes:
         click.echo("No changes needed - links do not exist.")
@@ -511,6 +523,8 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
 
     This removes the BBMD from all other BBMDs' BDTs and clears its own BDT.
 
+    Requires a prior 'walk' or 'read' to know which BBMDs to check.
+
     Examples:
         bbmd-manager delete-bbmd 192.168.1.3
     """
@@ -521,8 +535,28 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
     if ":" not in address:
         address = f"{address}:47808"
 
+    if not ctx.network.bbmds:
+        raise click.ClickException("No cached network state. Run 'walk' first to discover BBMDs.")
+
+    # Get list of BBMDs to read from cache (we need to know all BBMDs in the network)
+    bbmds_to_read = list(ctx.network.bbmds.keys())
+    if address not in bbmds_to_read:
+        bbmds_to_read.append(address)
+
+    click.echo("Reading current BDT state from devices...")
+
+    # Read live BDT data from all known BBMDs
+    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        for bbmd_addr in bbmds_to_read:
+            try:
+                click.echo(f"  Reading {bbmd_addr}...")
+                bbmd = client.read_bdt(bbmd_addr)
+                ctx.network.bbmds[bbmd_addr] = bbmd
+            except BBMDClientError as e:
+                click.echo(f"  Warning: Failed to read {bbmd_addr}: {e}")
+
     if address not in ctx.network.bbmds:
-        raise click.ClickException(f"{address} not in cached network state. Run 'walk' or 'read' first.")
+        raise click.ClickException(f"Could not read BDT from {address}")
 
     # Build the change plan
     changes = []
