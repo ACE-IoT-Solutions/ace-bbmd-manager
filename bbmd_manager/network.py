@@ -26,7 +26,7 @@ class NetworkWalker:
         if self.progress_callback:
             self.progress_callback(message)
 
-    def walk(self, seed_addresses: List[str], max_depth: int = 10) -> BBMDNetwork:
+    async def walk(self, seed_addresses: List[str], max_depth: int = 10) -> BBMDNetwork:
         """
         Walk the BBMD network starting from seed addresses.
 
@@ -60,7 +60,7 @@ class NetworkWalker:
                 self._log(f"Reading BDT from {address}...")
 
                 try:
-                    bbmd = self.client.read_bdt(address)
+                    bbmd = await self.client.read_bdt(address)
                     network.bbmds[address] = bbmd
                     self._log(f"  Found {len(bbmd.bdt)} entries in BDT")
 
@@ -95,7 +95,7 @@ class NetworkManager:
         self.client = client
         self.network = network
 
-    def add_link(self, source: str, target: str, bidirectional: bool = False) -> List[str]:
+    async def add_link(self, source: str, target: str, bidirectional: bool = False) -> List[str]:
         """
         Add a link from source BBMD to target BBMD.
 
@@ -120,7 +120,7 @@ class NetworkManager:
             bbmd = self.network.bbmds[source]
             if not any(e.address == target for e in bbmd.bdt):
                 new_bdt = list(bbmd.bdt) + [BDTEntry(address=target)]
-                self.client.write_bdt(source, new_bdt)
+                await self.client.write_bdt(source, new_bdt)
                 bbmd.bdt = new_bdt
                 modified.append(source)
 
@@ -129,13 +129,13 @@ class NetworkManager:
             bbmd = self.network.bbmds[target]
             if not any(e.address == source for e in bbmd.bdt):
                 new_bdt = list(bbmd.bdt) + [BDTEntry(address=source)]
-                self.client.write_bdt(target, new_bdt)
+                await self.client.write_bdt(target, new_bdt)
                 bbmd.bdt = new_bdt
                 modified.append(target)
 
         return modified
 
-    def delete_link(self, source: str, target: str, bidirectional: bool = False) -> List[str]:
+    async def delete_link(self, source: str, target: str, bidirectional: bool = False) -> List[str]:
         """
         Delete a link from source BBMD to target BBMD.
 
@@ -160,7 +160,7 @@ class NetworkManager:
             bbmd = self.network.bbmds[source]
             new_bdt = [e for e in bbmd.bdt if e.address != target]
             if len(new_bdt) != len(bbmd.bdt):
-                self.client.write_bdt(source, new_bdt)
+                await self.client.write_bdt(source, new_bdt)
                 bbmd.bdt = new_bdt
                 modified.append(source)
 
@@ -169,13 +169,13 @@ class NetworkManager:
             bbmd = self.network.bbmds[target]
             new_bdt = [e for e in bbmd.bdt if e.address != source]
             if len(new_bdt) != len(bbmd.bdt):
-                self.client.write_bdt(target, new_bdt)
+                await self.client.write_bdt(target, new_bdt)
                 bbmd.bdt = new_bdt
                 modified.append(target)
 
         return modified
 
-    def delete_bbmd(self, address: str) -> List[str]:
+    async def delete_bbmd(self, address: str) -> List[str]:
         """
         Delete a BBMD from the network (removes it from all other BBMDs' BDTs).
 
@@ -198,7 +198,7 @@ class NetworkManager:
 
             new_bdt = [e for e in bbmd.bdt if e.address != address]
             if len(new_bdt) != len(bbmd.bdt):
-                self.client.write_bdt(bbmd_addr, new_bdt)
+                await self.client.write_bdt(bbmd_addr, new_bdt)
                 bbmd.bdt = new_bdt
                 modified.append(bbmd_addr)
 
@@ -206,13 +206,13 @@ class NetworkManager:
         if address in self.network.bbmds:
             bbmd = self.network.bbmds[address]
             if bbmd.bdt:
-                self.client.write_bdt(address, [])
+                await self.client.write_bdt(address, [])
                 bbmd.bdt = []
                 modified.append(address)
 
         return modified
 
-    def set_bdt(self, address: str, entries: List[BDTEntry]) -> bool:
+    async def set_bdt(self, address: str, entries: List[BDTEntry]) -> bool:
         """
         Set the complete BDT for a BBMD.
 
@@ -227,7 +227,7 @@ class NetworkManager:
         if ":" not in address:
             address = f"{address}:47808"
 
-        self.client.write_bdt(address, entries)
+        await self.client.write_bdt(address, entries)
 
         if address in self.network.bbmds:
             self.network.bbmds[address].bdt = entries
