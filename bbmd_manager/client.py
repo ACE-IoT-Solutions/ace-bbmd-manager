@@ -181,6 +181,9 @@ class BBMDClient(Client):
                     # Entry is an Address object with addrMask attribute
                     self._debug_print(f"  Entry: {entry}, type: {type(entry)}")
                     addr_str = str(entry)
+                    # Normalize address to always include port
+                    if ":" not in addr_str:
+                        addr_str = f"{addr_str}:47808"
                     mask = getattr(entry, 'addrMask', 0xFFFFFFFF)
                     # Convert mask int to dotted notation
                     mask_str = f"{(mask >> 24) & 0xFF}.{(mask >> 16) & 0xFF}.{(mask >> 8) & 0xFF}.{mask & 0xFF}"
