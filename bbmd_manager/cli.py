@@ -263,10 +263,10 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
     if ":" not in target:
         target = f"{target}:47808"
 
-    click.echo("Reading current BDT state from devices...")
-
-    # Read live BDT data from devices
+    # Use single client connection for both read and write operations
     with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        click.echo("Reading current BDT state from devices...")
+
         try:
             # Read source BBMD
             click.echo(f"  Reading {source}...")
@@ -282,73 +282,72 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
         except BBMDClientError as e:
             raise click.ClickException(f"Failed to read BDT: {e}")
 
-    # Build the change plan
-    changes = []
+        # Build the change plan
+        changes = []
 
-    # Check source BBMD
-    source_bbmd = ctx.network.bbmds[source]
-    current_entries = [e.address for e in source_bbmd.bdt]
-    if target not in current_entries:
-        new_entries = current_entries + [target]
-        changes.append({
-            "bbmd": source,
-            "action": "add_entry",
-            "current_bdt": current_entries,
-            "new_bdt": new_entries,
-            "adding": target
-        })
-    else:
-        click.echo(f"Note: {source} already has link to {target}")
-
-    # Check target BBMD for bidirectional
-    if bidirectional:
-        target_bbmd = ctx.network.bbmds[target]
-        current_entries = [e.address for e in target_bbmd.bdt]
-        if source not in current_entries:
-            new_entries = current_entries + [source]
+        # Check source BBMD
+        source_bbmd = ctx.network.bbmds[source]
+        current_entries = [e.address for e in source_bbmd.bdt]
+        if target not in current_entries:
+            new_entries = current_entries + [target]
             changes.append({
-                "bbmd": target,
+                "bbmd": source,
                 "action": "add_entry",
                 "current_bdt": current_entries,
                 "new_bdt": new_entries,
-                "adding": source
+                "adding": target
             })
         else:
-            click.echo(f"Note: {target} already has link to {source}")
+            click.echo(f"Note: {source} already has link to {target}")
 
-    if not changes:
-        click.echo("No changes needed - links already exist.")
-        return
+        # Check target BBMD for bidirectional
+        if bidirectional:
+            target_bbmd = ctx.network.bbmds[target]
+            current_entries = [e.address for e in target_bbmd.bdt]
+            if source not in current_entries:
+                new_entries = current_entries + [source]
+                changes.append({
+                    "bbmd": target,
+                    "action": "add_entry",
+                    "current_bdt": current_entries,
+                    "new_bdt": new_entries,
+                    "adding": source
+                })
+            else:
+                click.echo(f"Note: {target} already has link to {source}")
 
-    # Display the change plan
-    click.echo(f"\n{'=' * 60}")
-    click.echo("PROPOSED CHANGES")
-    click.echo(f"{'=' * 60}")
-
-    for change in changes:
-        click.echo(f"\nBBMD: {change['bbmd']}")
-        click.echo(f"  Action: Add entry -> {change['adding']}")
-        click.echo(f"  Current BDT: {', '.join(change['current_bdt']) or '(empty)'}")
-        click.echo(f"  New BDT:     {', '.join(change['new_bdt'])}")
-
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"Total BBMDs to modify: {len(changes)}")
-    click.echo(f"{'=' * 60}")
-
-    if not yes:
-        if not click.confirm("\nProceed with these changes?"):
-            click.echo("Aborted.")
+        if not changes:
+            click.echo("No changes needed - links already exist.")
             return
 
-    # Create snapshot before change
-    rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
-    snapshot_id = rewind.prepare_change(
-        ctx.network,
-        f"add {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
-    )
-    click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+        # Display the change plan
+        click.echo(f"\n{'=' * 60}")
+        click.echo("PROPOSED CHANGES")
+        click.echo(f"{'=' * 60}")
 
-    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        for change in changes:
+            click.echo(f"\nBBMD: {change['bbmd']}")
+            click.echo(f"  Action: Add entry -> {change['adding']}")
+            click.echo(f"  Current BDT: {', '.join(change['current_bdt']) or '(empty)'}")
+            click.echo(f"  New BDT:     {', '.join(change['new_bdt'])}")
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Total BBMDs to modify: {len(changes)}")
+        click.echo(f"{'=' * 60}")
+
+        if not yes:
+            if not click.confirm("\nProceed with these changes?"):
+                click.echo("Aborted.")
+                return
+
+        # Create snapshot before change
+        rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
+        snapshot_id = rewind.prepare_change(
+            ctx.network,
+            f"add {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
+        )
+        click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+
         manager = NetworkManager(client, ctx.network)
         try:
             click.echo("\nApplying changes...")
@@ -400,10 +399,10 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
     if ":" not in target:
         target = f"{target}:47808"
 
-    click.echo("Reading current BDT state from devices...")
-
-    # Read live BDT data from devices
+    # Use single client connection for both read and write operations
     with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        click.echo("Reading current BDT state from devices...")
+
         try:
             # Read source BBMD
             click.echo(f"  Reading {source}...")
@@ -419,73 +418,72 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
         except BBMDClientError as e:
             raise click.ClickException(f"Failed to read BDT: {e}")
 
-    # Build the change plan
-    changes = []
+        # Build the change plan
+        changes = []
 
-    # Check source BBMD
-    source_bbmd = ctx.network.bbmds[source]
-    current_entries = [e.address for e in source_bbmd.bdt]
-    if target in current_entries:
-        new_entries = [e for e in current_entries if e != target]
-        changes.append({
-            "bbmd": source,
-            "action": "remove_entry",
-            "current_bdt": current_entries,
-            "new_bdt": new_entries,
-            "removing": target
-        })
-    else:
-        click.echo(f"Note: {source} does not have link to {target}")
-
-    # Check target BBMD for bidirectional
-    if bidirectional:
-        target_bbmd = ctx.network.bbmds[target]
-        current_entries = [e.address for e in target_bbmd.bdt]
-        if source in current_entries:
-            new_entries = [e for e in current_entries if e != source]
+        # Check source BBMD
+        source_bbmd = ctx.network.bbmds[source]
+        current_entries = [e.address for e in source_bbmd.bdt]
+        if target in current_entries:
+            new_entries = [e for e in current_entries if e != target]
             changes.append({
-                "bbmd": target,
+                "bbmd": source,
                 "action": "remove_entry",
                 "current_bdt": current_entries,
                 "new_bdt": new_entries,
-                "removing": source
+                "removing": target
             })
         else:
-            click.echo(f"Note: {target} does not have link to {source}")
+            click.echo(f"Note: {source} does not have link to {target}")
 
-    if not changes:
-        click.echo("No changes needed - links do not exist.")
-        return
+        # Check target BBMD for bidirectional
+        if bidirectional:
+            target_bbmd = ctx.network.bbmds[target]
+            current_entries = [e.address for e in target_bbmd.bdt]
+            if source in current_entries:
+                new_entries = [e for e in current_entries if e != source]
+                changes.append({
+                    "bbmd": target,
+                    "action": "remove_entry",
+                    "current_bdt": current_entries,
+                    "new_bdt": new_entries,
+                    "removing": source
+                })
+            else:
+                click.echo(f"Note: {target} does not have link to {source}")
 
-    # Display the change plan
-    click.echo(f"\n{'=' * 60}")
-    click.echo("PROPOSED CHANGES")
-    click.echo(f"{'=' * 60}")
-
-    for change in changes:
-        click.echo(f"\nBBMD: {change['bbmd']}")
-        click.echo(f"  Action: Remove entry -> {change['removing']}")
-        click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
-        click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
-
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"Total BBMDs to modify: {len(changes)}")
-    click.echo(f"{'=' * 60}")
-
-    if not yes:
-        if not click.confirm("\nProceed with these changes?"):
-            click.echo("Aborted.")
+        if not changes:
+            click.echo("No changes needed - links do not exist.")
             return
 
-    # Create snapshot before change
-    rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
-    snapshot_id = rewind.prepare_change(
-        ctx.network,
-        f"delete {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
-    )
-    click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+        # Display the change plan
+        click.echo(f"\n{'=' * 60}")
+        click.echo("PROPOSED CHANGES")
+        click.echo(f"{'=' * 60}")
 
-    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        for change in changes:
+            click.echo(f"\nBBMD: {change['bbmd']}")
+            click.echo(f"  Action: Remove entry -> {change['removing']}")
+            click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
+            click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Total BBMDs to modify: {len(changes)}")
+        click.echo(f"{'=' * 60}")
+
+        if not yes:
+            if not click.confirm("\nProceed with these changes?"):
+                click.echo("Aborted.")
+                return
+
+        # Create snapshot before change
+        rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
+        snapshot_id = rewind.prepare_change(
+            ctx.network,
+            f"delete {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
+        )
+        click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+
         manager = NetworkManager(client, ctx.network)
         try:
             click.echo("\nApplying changes...")
@@ -543,10 +541,11 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
     if address not in bbmds_to_read:
         bbmds_to_read.append(address)
 
-    click.echo("Reading current BDT state from devices...")
-
-    # Read live BDT data from all known BBMDs
+    # Use single client connection for both read and write operations
     with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        click.echo("Reading current BDT state from devices...")
+
+        # Read live BDT data from all known BBMDs
         for bbmd_addr in bbmds_to_read:
             try:
                 click.echo(f"  Reading {bbmd_addr}...")
@@ -555,71 +554,70 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
             except BBMDClientError as e:
                 click.echo(f"  Warning: Failed to read {bbmd_addr}: {e}")
 
-    if address not in ctx.network.bbmds:
-        raise click.ClickException(f"Could not read BDT from {address}")
+        if address not in ctx.network.bbmds:
+            raise click.ClickException(f"Could not read BDT from {address}")
 
-    # Build the change plan
-    changes = []
+        # Build the change plan
+        changes = []
 
-    # Find all BBMDs that have this address in their BDT
-    for bbmd_addr, bbmd in ctx.network.bbmds.items():
-        if bbmd_addr == address:
-            continue
-        current_entries = [e.address for e in bbmd.bdt]
-        if address in current_entries:
-            new_entries = [e for e in current_entries if e != address]
+        # Find all BBMDs that have this address in their BDT
+        for bbmd_addr, bbmd in ctx.network.bbmds.items():
+            if bbmd_addr == address:
+                continue
+            current_entries = [e.address for e in bbmd.bdt]
+            if address in current_entries:
+                new_entries = [e for e in current_entries if e != address]
+                changes.append({
+                    "bbmd": bbmd_addr,
+                    "action": "remove_entry",
+                    "current_bdt": current_entries,
+                    "new_bdt": new_entries,
+                    "removing": address
+                })
+
+        # Also clear the target BBMD's own BDT
+        target_bbmd = ctx.network.bbmds[address]
+        if target_bbmd.bdt:
             changes.append({
-                "bbmd": bbmd_addr,
-                "action": "remove_entry",
-                "current_bdt": current_entries,
-                "new_bdt": new_entries,
-                "removing": address
+                "bbmd": address,
+                "action": "clear_bdt",
+                "current_bdt": [e.address for e in target_bbmd.bdt],
+                "new_bdt": [],
+                "removing": "(all entries)"
             })
 
-    # Also clear the target BBMD's own BDT
-    target_bbmd = ctx.network.bbmds[address]
-    if target_bbmd.bdt:
-        changes.append({
-            "bbmd": address,
-            "action": "clear_bdt",
-            "current_bdt": [e.address for e in target_bbmd.bdt],
-            "new_bdt": [],
-            "removing": "(all entries)"
-        })
-
-    if not changes:
-        click.echo("No changes needed - BBMD has no links to/from other BBMDs.")
-        return
-
-    # Display the change plan
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"PROPOSED CHANGES - Remove BBMD {address}")
-    click.echo(f"{'=' * 60}")
-
-    for change in changes:
-        click.echo(f"\nBBMD: {change['bbmd']}")
-        if change['action'] == 'clear_bdt':
-            click.echo(f"  Action: Clear entire BDT")
-        else:
-            click.echo(f"  Action: Remove entry -> {change['removing']}")
-        click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
-        click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
-
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"Total BBMDs to modify: {len(changes)}")
-    click.echo(f"{'=' * 60}")
-
-    if not yes:
-        if not click.confirm("\nProceed with these changes?"):
-            click.echo("Aborted.")
+        if not changes:
+            click.echo("No changes needed - BBMD has no links to/from other BBMDs.")
             return
 
-    # Create snapshot before change
-    rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
-    snapshot_id = rewind.prepare_change(ctx.network, f"delete BBMD {address}")
-    click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+        # Display the change plan
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"PROPOSED CHANGES - Remove BBMD {address}")
+        click.echo(f"{'=' * 60}")
 
-    with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+        for change in changes:
+            click.echo(f"\nBBMD: {change['bbmd']}")
+            if change['action'] == 'clear_bdt':
+                click.echo(f"  Action: Clear entire BDT")
+            else:
+                click.echo(f"  Action: Remove entry -> {change['removing']}")
+            click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
+            click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Total BBMDs to modify: {len(changes)}")
+        click.echo(f"{'=' * 60}")
+
+        if not yes:
+            if not click.confirm("\nProceed with these changes?"):
+                click.echo("Aborted.")
+                return
+
+        # Create snapshot before change
+        rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
+        snapshot_id = rewind.prepare_change(ctx.network, f"delete BBMD {address}")
+        click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+
         manager = NetworkManager(client, ctx.network)
         try:
             click.echo("\nApplying changes...")

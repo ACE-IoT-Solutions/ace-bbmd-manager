@@ -7,7 +7,7 @@ packages = ["bbmd_manager"]
 
 [project]
 name = "ace-bbmd-manager"
-version = "0.2.0"
+version = "0.2.1"
 description = "CLI tool for managing BACnet BBMD Broadcast Distribution Tables with audit logging and rollback"
 readme = "README.md"
 requires-python = ">=3.8"
