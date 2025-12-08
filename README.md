@@ -1,5 +1,8 @@
 # BBMD Manager
 
+[![PyPI version](https://badge.fury.io/py/ace-bbmd-manager.svg)](https://pypi.org/project/ace-bbmd-manager/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
 A CLI tool for managing BACnet BBMD (BACnet Broadcast Management Device) Broadcast Distribution Tables with full audit logging and rollback capability.
 
 ## Features
@@ -10,18 +13,29 @@ A CLI tool for managing BACnet BBMD (BACnet Broadcast Management Device) Broadca
 - **Audit Logging**: Full audit trail persisted to JSON
 - **Rollback**: Snapshot-based rollback system to undo changes
 - **Safe Operations**: Detailed change preview and confirmation before any mutation
+- **Async Architecture**: Built on bacpypes3 with modern async/await patterns
 
 ## Installation
 
 ```bash
+# Install from PyPI
+pip install ace-bbmd-manager
+
+# Or install with uv
+uv pip install ace-bbmd-manager
+```
+
+### Development Installation
+
+```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/ACE-IoT-Solutions/ace-bbmd-manager.git
 cd ace-bbmd-manager
 
 # Install with uv
 uv sync
 
-# Or install with pip
+# Or install with pip in editable mode
 pip install -e .
 ```
 
@@ -254,7 +268,7 @@ bbmd-manager -l 192.168.1.100 -d read 192.168.1.1
 ## Requirements
 
 - Python 3.8+
-- bacpypes (BACnet protocol library)
+- bacpypes3 (BACnet protocol library)
 - click (CLI framework)
 
 ## License
