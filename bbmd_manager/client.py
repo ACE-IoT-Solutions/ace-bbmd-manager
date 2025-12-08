@@ -12,10 +12,10 @@ from bacpypes3.ipv4.bvll import (
     ReadBroadcastDistributionTableAck,
     WriteBroadcastDistributionTable,
     Result,
+    BVLLCodec,
 )
-from bacpypes3.ipv4.service import BVLLServiceAccessPoint
+from bacpypes3.ipv4.service import BIPNormal, UDPMultiplexer
 from bacpypes3.ipv4 import IPv4DatagramServer
-from bacpypes3.ipv4.bvll import BVLLCodec
 
 from .models import BDTEntry, BBMD
 
@@ -43,13 +43,13 @@ class BVLLServiceElement(ApplicationServiceElement):
         self._debug_print(f"Received PDU type: {type(pdu).__name__}")
 
         if self._debug:
-            self._debug_print(f"PDU attributes:")
+            self._debug_print("PDU attributes:")
             for attr in dir(pdu):
                 if not attr.startswith('_') and not callable(getattr(pdu, attr, None)):
                     try:
                         val = getattr(pdu, attr)
                         self._debug_print(f"  {attr} = {val}")
-                    except:
+                    except Exception:
                         pass
 
         # Get the source address to match with pending request
@@ -117,9 +117,7 @@ class BBMDClient:
         self.local_address = local_address
         self.timeout = timeout
         self.debug = debug
-        self._server = None
-        self._codec = None
-        self._sap = None
+        self._link_layer = None
         self._ase = None
 
     def _debug_print(self, msg: str):
@@ -139,16 +137,21 @@ class BBMDClient:
         # Create the IPv4 address
         local_addr = IPv4Address(addr_str)
 
-        # Build the minimal stack for BVLL operations:
-        # IPv4DatagramServer -> BVLLCodec -> BVLLServiceAccessPoint -> BVLLServiceElement
-        self._server = IPv4DatagramServer(local_addr)
+        # Build a minimal BVLL link layer stack like NormalLinkLayer does:
+        # BIPNormal -> BVLLCodec -> UDPMultiplexer.annexJ
+        # UDPMultiplexer -> IPv4DatagramServer
+        self._bip = BIPNormal()
         self._codec = BVLLCodec()
-        self._sap = BVLLServiceAccessPoint()
-        self._ase = BVLLServiceElement(debug=self.debug)
+        self._multiplexer = UDPMultiplexer()
+        self._server = IPv4DatagramServer(local_addr)
 
-        # Bind the layers together
-        bind(self._server, self._codec, self._sap)
-        bind(self._ase, self._sap)
+        # Bind the stack together
+        bind(self._bip, self._codec, self._multiplexer.annexJ)
+        bind(self._multiplexer, self._server)
+
+        # Create our service element and bind it to the BIPNormal (which is a SAP)
+        self._ase = BVLLServiceElement(debug=self.debug)
+        bind(self._ase, self._bip)
 
         self._debug_print("Stack initialized")
 
@@ -157,8 +160,9 @@ class BBMDClient:
         if self._server:
             self._server.close()
             self._server = None
+        self._bip = None
         self._codec = None
-        self._sap = None
+        self._multiplexer = None
         self._ase = None
 
     async def read_bdt(self, bbmd_address: str) -> BBMD:
@@ -200,7 +204,7 @@ class BBMDClient:
         bdt_entries = []
         bdt_list = result_data
 
-        self._debug_print(f"Parsing response...")
+        self._debug_print("Parsing response...")
         self._debug_print(f"bvlciBDT = {bdt_list}")
         self._debug_print(f"bvlciBDT len = {len(bdt_list) if bdt_list else 0}")
 
