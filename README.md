@@ -1,6 +1,7 @@
 # BBMD Manager
 
 [![PyPI version](https://badge.fury.io/py/ace-bbmd-manager.svg)](https://pypi.org/project/ace-bbmd-manager/)
+[![Container Image](https://ghcr-badge.egpl.dev/ace-iot-solutions/ace-bbmd-manager/size)](https://github.com/ACE-IoT-Solutions/ace-bbmd-manager/pkgs/container/ace-bbmd-manager)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 A CLI tool for managing BACnet BBMD (BACnet Broadcast Management Device) Broadcast Distribution Tables with full audit logging and rollback capability.
@@ -267,12 +268,21 @@ bbmd-manager -l 192.168.1.100 -d read 192.168.1.1
 
 ## Docker
 
-A container image is available on GitHub Container Registry:
+A container image is available on GitHub Container Registry, built on `python:3.12-alpine` with `uv` for fast startup.
+
+### Quick Start
 
 ```bash
 # Pull the latest image
 docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest
 
+# Or pull a specific version
+docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.3
+```
+
+### Running Commands
+
+```bash
 # Run with host networking (required for BACnet UDP)
 docker run --rm --network host \
   -v $(pwd):/data \
@@ -282,9 +292,30 @@ docker run --rm --network host \
 # View status from cached state
 docker run --rm -v $(pwd):/data \
   ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest status
+
+# Add a bidirectional link
+docker run --rm --network host \
+  -v $(pwd):/data \
+  ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest \
+  -l 192.168.1.100 add-link 192.168.1.1 192.168.1.2 -b -y
 ```
 
-Note: Host networking (`--network host`) is typically required for BACnet communication since it uses UDP port 47808 for broadcast messages.
+### Shell Alias
+
+For convenience, add an alias to your shell configuration:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+alias bbmd-manager='docker run --rm --network host -v $(pwd):/data ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest'
+
+# Then use normally
+bbmd-manager -l 192.168.1.100 walk 192.168.1.1
+bbmd-manager status
+```
+
+### Networking Note
+
+Host networking (`--network host`) is typically required for BACnet communication since it uses UDP port 47808 for broadcast messages. The `-v $(pwd):/data` mount persists state files (`.bbmd_state.json`, `.bbmd_audit.json`, `.bbmd_snapshots.json`) to your current directory.
 
 ## Requirements
 
