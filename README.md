@@ -265,6 +265,27 @@ pytest tests/ -v
 bbmd-manager -l 192.168.1.100 -d read 192.168.1.1
 ```
 
+## Docker
+
+A container image is available on GitHub Container Registry:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest
+
+# Run with host networking (required for BACnet UDP)
+docker run --rm --network host \
+  -v $(pwd):/data \
+  ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest \
+  -l 192.168.1.100 walk 192.168.1.1
+
+# View status from cached state
+docker run --rm -v $(pwd):/data \
+  ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest status
+```
+
+Note: Host networking (`--network host`) is typically required for BACnet communication since it uses UDP port 47808 for broadcast messages.
+
 ## Requirements
 
 - Python 3.8+
