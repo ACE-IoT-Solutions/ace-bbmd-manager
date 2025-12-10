@@ -7,7 +7,7 @@ packages = ["bbmd_manager"]
 
 [project]
 name = "ace-bbmd-manager"
-version = "0.3.3"
+version = "0.3.4"
 description = "CLI tool for managing BACnet BBMD Broadcast Distribution Tables with audit logging and rollback"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -15,6 +15,11 @@ dependencies = [
     "bacpypes3>=0.0.102",
     "click>=8.1.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ACE-IoT-Solutions/ace-bbmd-manager"
+Repository = "https://github.com/ACE-IoT-Solutions/ace-bbmd-manager"
+Issues = "https://github.com/ACE-IoT-Solutions/ace-bbmd-manager/issues"
 
 [project.scripts]
 bbmd-manager = "bbmd_manager.cli:main"

@@ -277,7 +277,7 @@ A container image is available on GitHub Container Registry, built on `python:3.
 docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest
 
 # Or pull a specific version
-docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.3
+docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.4
 ```
 
 ### Running Commands
