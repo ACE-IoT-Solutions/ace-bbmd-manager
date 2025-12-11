@@ -192,6 +192,22 @@ bbmd-manager clear-history --all  # Clear audit log and snapshots
 | `-v, --verbose` | | Enable verbose output |
 | `-d, --debug` | | Enable debug output for BACnet protocol |
 
+### Local Address Resolution
+
+The local address is resolved in the following order of precedence:
+1. `-l, --local-address` command line option
+2. `BBMD_LOCAL_ADDRESS` environment variable
+3. `address` field from `BACpypes.ini` in the current working directory
+
+If you have a `BACpypes.ini` file (standard BACpypes configuration), the tool will automatically use the address from it:
+
+```ini
+[BACpypes]
+address: 192.168.1.100/24
+```
+
+The CIDR suffix (e.g., `/24`) is automatically stripped when reading from the INI file.
+
 ## Example Workflow
 
 ```bash

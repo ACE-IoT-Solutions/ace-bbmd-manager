@@ -1,7 +1,9 @@
 """Click CLI for BBMD Manager."""
 
 import asyncio
+import configparser
 import json
+import os
 import sys
 from typing import List, Optional
 
@@ -17,6 +19,34 @@ from .network import NetworkManager, NetworkWalker
 DEFAULT_STATE_FILE = ".bbmd_state.json"
 DEFAULT_AUDIT_FILE = ".bbmd_audit.json"
 DEFAULT_SNAPSHOT_FILE = ".bbmd_snapshots.json"
+DEFAULT_BACPYPES_INI = "BACpypes.ini"
+
+
+def get_address_from_ini(ini_path: str = DEFAULT_BACPYPES_INI) -> Optional[str]:
+    """Read local address from BACpypes.ini file if present.
+
+    Args:
+        ini_path: Path to the BACpypes.ini file (default: BACpypes.ini in CWD)
+
+    Returns:
+        The address string (without CIDR suffix) or None if not found
+    """
+    if not os.path.exists(ini_path):
+        return None
+
+    config = configparser.ConfigParser()
+    try:
+        config.read(ini_path)
+        if 'BACpypes' in config and 'address' in config['BACpypes']:
+            address = config['BACpypes']['address']
+            # Strip CIDR suffix if present (e.g., "192.168.1.100/24" -> "192.168.1.100")
+            if '/' in address:
+                address = address.split('/')[0]
+            return address
+    except (configparser.Error, KeyError):
+        pass
+
+    return None
 
 
 class Context:
@@ -59,7 +89,7 @@ pass_context = click.make_pass_decorator(Context, ensure=True)
 
 @click.group()
 @click.option('--local-address', '-l', envvar='BBMD_LOCAL_ADDRESS',
-              help='Local IP address for BACnet communication')
+              help='Local IP address for BACnet communication (also reads from BACpypes.ini)')
 @click.option('--state-file', '-s', default=DEFAULT_STATE_FILE,
               help='Path to state file')
 @click.option('--audit-file', '-a', default=DEFAULT_AUDIT_FILE,
@@ -76,6 +106,14 @@ def cli(ctx: Context, local_address: Optional[str], state_file: str,
     This tool allows you to read, modify, and manage BDTs across a network
     of BBMDs, with full audit logging and rollback capability.
     """
+    # Check for BACpypes.ini if no local address provided
+    if local_address is None:
+        ini_address = get_address_from_ini()
+        if ini_address:
+            local_address = ini_address
+            if verbose or debug:
+                click.echo(f"Using address from BACpypes.ini: {local_address}")
+
     ctx.local_address = local_address
     ctx.state_file = state_file
     ctx.verbose = verbose or debug

@@ -366,3 +366,85 @@ class TestRewindCommand:
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
         assert "192.168.1.1:47808" in result.output
+
+
+class TestBACpypesIniIntegration:
+    def test_get_address_from_ini_not_found(self, temp_dir):
+        from bbmd_manager.cli import get_address_from_ini
+
+        result = get_address_from_ini(os.path.join(temp_dir, "BACpypes.ini"))
+        assert result is None
+
+    def test_get_address_from_ini_basic(self, temp_dir):
+        from bbmd_manager.cli import get_address_from_ini
+
+        ini_path = os.path.join(temp_dir, "BACpypes.ini")
+        with open(ini_path, 'w') as f:
+            f.write("[BACpypes]\n")
+            f.write("address: 192.168.1.100\n")
+
+        result = get_address_from_ini(ini_path)
+        assert result == "192.168.1.100"
+
+    def test_get_address_from_ini_with_cidr(self, temp_dir):
+        from bbmd_manager.cli import get_address_from_ini
+
+        ini_path = os.path.join(temp_dir, "BACpypes.ini")
+        with open(ini_path, 'w') as f:
+            f.write("[BACpypes]\n")
+            f.write("address: 192.168.1.100/24\n")
+
+        result = get_address_from_ini(ini_path)
+        assert result == "192.168.1.100"
+
+    def test_get_address_from_ini_missing_section(self, temp_dir):
+        from bbmd_manager.cli import get_address_from_ini
+
+        ini_path = os.path.join(temp_dir, "BACpypes.ini")
+        with open(ini_path, 'w') as f:
+            f.write("[OtherSection]\n")
+            f.write("address: 192.168.1.100\n")
+
+        result = get_address_from_ini(ini_path)
+        assert result is None
+
+    def test_get_address_from_ini_missing_key(self, temp_dir):
+        from bbmd_manager.cli import get_address_from_ini
+
+        ini_path = os.path.join(temp_dir, "BACpypes.ini")
+        with open(ini_path, 'w') as f:
+            f.write("[BACpypes]\n")
+            f.write("objectName: TestDevice\n")
+
+        result = get_address_from_ini(ini_path)
+        assert result is None
+
+    def test_cli_uses_ini_address(self, runner, temp_dir):
+        """Test that CLI uses address from BACpypes.ini when no other address is provided."""
+        state_file = os.path.join(temp_dir, "state.json")
+        audit_file = os.path.join(temp_dir, "audit.json")
+        snapshot_file = os.path.join(temp_dir, "snapshots.json")
+        ini_path = os.path.join(temp_dir, "BACpypes.ini")
+
+        with open(ini_path, 'w') as f:
+            f.write("[BACpypes]\n")
+            f.write("address: 10.0.0.50/24\n")
+
+        # Run with verbose to see the "Using address from BACpypes.ini" message
+        # Use isolated filesystem to ensure we're in temp_dir
+        with runner.isolated_filesystem(temp_dir=temp_dir) as td:
+            # Create the INI file in the isolated filesystem
+            with open("BACpypes.ini", 'w') as f:
+                f.write("[BACpypes]\n")
+                f.write("address: 10.0.0.50/24\n")
+
+            result = runner.invoke(cli, [
+                '--state-file', state_file,
+                '--audit-file', audit_file,
+                '--snapshot-file', snapshot_file,
+                '--verbose',
+                'status'
+            ])
+
+            assert result.exit_code == 0
+            assert "Using address from BACpypes.ini: 10.0.0.50" in result.output
