@@ -13,6 +13,7 @@ from .audit import AuditLog, RewindManager, SnapshotManager
 from .client import BBMDClient, BBMDClientError
 from .models import BBMDNetwork, BDTEntry
 from .network import NetworkManager, NetworkWalker
+from .output import BBMDConsole, OutputFormatter
 
 
 # Default file paths
@@ -60,11 +61,13 @@ class Context:
         self.network: Optional[BBMDNetwork] = None
         self.verbose: bool = False
         self.debug: bool = False
+        self.console: Optional[BBMDConsole] = None
+        self.formatter: OutputFormatter = OutputFormatter()
 
-    def log(self, message: str, nl: bool = True):
+    def log(self, message: str):
         """Print message if verbose mode is on."""
-        if self.verbose:
-            click.echo(message, nl=nl)
+        if self.verbose and self.console:
+            self.console.verbose_log(message)
 
     def load_state(self):
         """Load network state from file."""
@@ -106,23 +109,25 @@ def cli(ctx: Context, local_address: Optional[str], state_file: str,
     This tool allows you to read, modify, and manage BDTs across a network
     of BBMDs, with full audit logging and rollback capability.
     """
+    ctx.verbose = verbose or debug
+    ctx.debug = debug
+    ctx.console = BBMDConsole(verbose=ctx.verbose)
+
     # Check for BACpypes.ini if no local address provided
     if local_address is None:
         ini_address = get_address_from_ini()
         if ini_address:
             local_address = ini_address
             if verbose or debug:
-                click.echo(f"Using address from BACpypes.ini: {local_address}")
+                ctx.console.info(f"Using address from BACpypes.ini: {local_address}")
 
     ctx.local_address = local_address
     ctx.state_file = state_file
-    ctx.verbose = verbose or debug
-    ctx.debug = debug
     ctx.audit_log = AuditLog(audit_file)
     ctx.snapshot_manager = SnapshotManager(snapshot_file)
 
     if debug:
-        click.echo("Debug mode enabled")
+        ctx.console.debug("Debug mode enabled")
     ctx.load_state()
 
 
@@ -148,11 +153,13 @@ def walk(ctx: Context, addresses: tuple, depth: int):
         raise click.ClickException("Local address required. Use --local-address or set BBMD_LOCAL_ADDRESS")
 
     async def do_walk():
-        click.echo(f"Walking network from {len(addresses)} seed address(es)...")
+        with ctx.console.progress_status(f"Walking network from {len(addresses)} seed address(es)...") as status:
+            def progress_callback(msg: str):
+                status.update(f"[bold blue]{msg}[/bold blue]")
 
-        async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
-            walker = NetworkWalker(client, progress_callback=click.echo if ctx.verbose else None)
-            ctx.network = await walker.walk(list(addresses), max_depth=depth)
+            async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+                walker = NetworkWalker(client, progress_callback=progress_callback if ctx.verbose else None)
+                ctx.network = await walker.walk(list(addresses), max_depth=depth)
 
         ctx.save_state()
 
@@ -167,10 +174,9 @@ def walk(ctx: Context, addresses: tuple, depth: int):
             }
         )
 
-        click.echo(f"\nDiscovered {len(ctx.network.bbmds)} BBMD(s):")
-        for addr in sorted(ctx.network.bbmds.keys()):
-            bbmd = ctx.network.bbmds[addr]
-            click.echo(f"  {addr} - {len(bbmd.bdt)} BDT entries")
+        ctx.console.success(f"Discovered {len(ctx.network.bbmds)} BBMD(s)")
+        table = ctx.formatter.discovery_table(ctx.network.bbmds)
+        ctx.console.print(table)
 
     asyncio.run(do_walk())
 
@@ -189,27 +195,24 @@ def read(ctx: Context, address: str):
         raise click.ClickException("Local address required. Use --local-address or set BBMD_LOCAL_ADDRESS")
 
     async def do_read():
-        async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
-            try:
-                bbmd = await client.read_bdt(address)
-                ctx.network.bbmds[bbmd.address] = bbmd
-                ctx.save_state()
+        with ctx.console.progress_status(f"Reading BDT from {address}...") as status:
+            async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+                try:
+                    bbmd = await client.read_bdt(address)
+                    ctx.network.bbmds[bbmd.address] = bbmd
+                    ctx.save_state()
 
-                ctx.audit_log.log(
-                    action="read_bdt",
-                    bbmd_address=bbmd.address,
-                    details={"entry_count": len(bbmd.bdt)}
-                )
+                    ctx.audit_log.log(
+                        action="read_bdt",
+                        bbmd_address=bbmd.address,
+                        details={"entry_count": len(bbmd.bdt)}
+                    )
 
-                click.echo(f"\nBDT for {bbmd.address}:")
-                if bbmd.bdt:
-                    for entry in bbmd.bdt:
-                        click.echo(f"  {entry.address}")
-                else:
-                    click.echo("  (empty)")
+                except BBMDClientError as e:
+                    raise click.ClickException(str(e))
 
-            except BBMDClientError as e:
-                raise click.ClickException(str(e))
+        table = ctx.formatter.bdt_table(bbmd.bdt, bbmd.address, bbmd.subnet)
+        ctx.console.print(table)
 
     asyncio.run(do_read())
 
@@ -228,23 +231,14 @@ def status(ctx: Context, output_format: str):
     Displays all known BBMDs and their BDT entries from the cached state.
     """
     if not ctx.network.bbmds:
-        click.echo("No network state. Run 'walk' or 'read' first.")
+        ctx.console.empty_state("No network state. Run 'walk' or 'read' first.")
         return
 
     if output_format == 'json':
-        click.echo(json.dumps(ctx.network.to_dict(), indent=2))
+        ctx.console.raw(json.dumps(ctx.network.to_dict(), indent=2))
     else:
-        click.echo(f"\nBBMD Network Status ({len(ctx.network.bbmds)} BBMDs)")
-        click.echo("=" * 60)
-
-        for addr in sorted(ctx.network.bbmds.keys()):
-            bbmd = ctx.network.bbmds[addr]
-            click.echo(f"\n{addr}")
-            if bbmd.last_read:
-                click.echo(f"  Last read: {bbmd.last_read.strftime('%Y-%m-%d %H:%M:%S')}")
-            click.echo(f"  BDT entries ({len(bbmd.bdt)}):")
-            for entry in bbmd.bdt:
-                click.echo(f"    -> {entry.address}")
+        table = ctx.formatter.bbmd_status_table(ctx.network.bbmds)
+        ctx.console.print(table)
 
 
 @cli.command()
@@ -255,30 +249,17 @@ def links(ctx: Context):
     Displays directed links between BBMDs with bidirectional indication.
     """
     if not ctx.network.bbmds:
-        click.echo("No network state. Run 'walk' or 'read' first.")
+        ctx.console.empty_state("No network state. Run 'walk' or 'read' first.")
         return
 
     all_links = ctx.network.get_links()
 
     if not all_links:
-        click.echo("No links found in network.")
+        ctx.console.empty_state("No links found in network.")
         return
 
-    click.echo(f"\nNetwork Links ({len(all_links)} directed links)")
-    click.echo("=" * 60)
-
-    # Group by source
-    shown_bidirectional = set()
-    for source, target in sorted(all_links):
-        pair = tuple(sorted([source, target]))
-        is_bidirectional = ctx.network.has_bidirectional_link(source, target)
-
-        if is_bidirectional:
-            if pair not in shown_bidirectional:
-                click.echo(f"  {source} <-> {target}  (bidirectional)")
-                shown_bidirectional.add(pair)
-        else:
-            click.echo(f"  {source} --> {target}")
+    table = ctx.formatter.links_table(all_links, ctx.network)
+    ctx.console.print(table)
 
 
 # ============================================================================
@@ -311,22 +292,21 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
     async def do_add_link():
         # Use single client connection for both read and write operations
         async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
-            click.echo("Reading current BDT state from devices...")
+            with ctx.console.progress_status("Reading current BDT state from devices...") as status:
+                try:
+                    # Read source BBMD
+                    status.update(f"[bold blue]Reading {source}...[/bold blue]")
+                    source_bbmd = await client.read_bdt(source)
+                    ctx.network.bbmds[source] = source_bbmd
 
-            try:
-                # Read source BBMD
-                click.echo(f"  Reading {source}...")
-                source_bbmd = await client.read_bdt(source)
-                ctx.network.bbmds[source] = source_bbmd
+                    # Read target BBMD if bidirectional
+                    if bidirectional:
+                        status.update(f"[bold blue]Reading {target}...[/bold blue]")
+                        target_bbmd = await client.read_bdt(target)
+                        ctx.network.bbmds[target] = target_bbmd
 
-                # Read target BBMD if bidirectional
-                if bidirectional:
-                    click.echo(f"  Reading {target}...")
-                    target_bbmd = await client.read_bdt(target)
-                    ctx.network.bbmds[target] = target_bbmd
-
-            except BBMDClientError as e:
-                raise click.ClickException(f"Failed to read BDT: {e}")
+                except BBMDClientError as e:
+                    raise click.ClickException(f"Failed to read BDT: {e}")
 
             # Build the change plan
             changes = []
@@ -344,7 +324,7 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
                     "adding": target
                 })
             else:
-                click.echo(f"Note: {source} already has link to {target}")
+                ctx.console.info(f"{source} already has link to {target}")
 
             # Check target BBMD for bidirectional
             if bidirectional:
@@ -360,30 +340,19 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
                         "adding": source
                     })
                 else:
-                    click.echo(f"Note: {target} already has link to {source}")
+                    ctx.console.info(f"{target} already has link to {source}")
 
             if not changes:
-                click.echo("No changes needed - links already exist.")
+                ctx.console.info("No changes needed - links already exist.")
                 return
 
             # Display the change plan
-            click.echo(f"\n{'=' * 60}")
-            click.echo("PROPOSED CHANGES")
-            click.echo(f"{'=' * 60}")
-
-            for change in changes:
-                click.echo(f"\nBBMD: {change['bbmd']}")
-                click.echo(f"  Action: Add entry -> {change['adding']}")
-                click.echo(f"  Current BDT: {', '.join(change['current_bdt']) or '(empty)'}")
-                click.echo(f"  New BDT:     {', '.join(change['new_bdt'])}")
-
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"Total BBMDs to modify: {len(changes)}")
-            click.echo(f"{'=' * 60}")
+            panel = ctx.formatter.change_plan_panel(changes)
+            ctx.console.print(panel)
 
             if not yes:
-                if not click.confirm("\nProceed with these changes?"):
-                    click.echo("Aborted.")
+                if not ctx.console.confirm("Proceed with these changes?"):
+                    ctx.console.warning("Aborted.")
                     return
 
             # Create snapshot before change
@@ -392,12 +361,12 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
                 ctx.network,
                 f"add {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
             )
-            click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+            ctx.console.info(f"Created rollback snapshot: {snapshot_id}")
 
             manager = NetworkManager(client, ctx.network)
             try:
-                click.echo("\nApplying changes...")
-                modified = await manager.add_link(source, target, bidirectional=bidirectional)
+                with ctx.console.progress_status("Applying changes...") as status:
+                    modified = await manager.add_link(source, target, bidirectional=bidirectional)
 
                 ctx.save_state()
 
@@ -413,10 +382,10 @@ def add_link(ctx: Context, source: str, target: str, bidirectional: bool, yes: b
                 )
 
                 for addr in modified:
-                    click.echo(f"  Updated {addr}")
+                    ctx.console.success(f"Updated {addr}")
 
-                click.echo(f"\nSuccess! Modified {len(modified)} BBMD(s).")
-                click.echo(f"To undo: bbmd-manager rewind {snapshot_id}")
+                ctx.console.success(f"Modified {len(modified)} BBMD(s)")
+                ctx.console.info(f"To undo: bbmd-manager rewind {snapshot_id}")
 
             except BBMDClientError as e:
                 raise click.ClickException(str(e))
@@ -450,22 +419,21 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
     async def do_delete_link():
         # Use single client connection for both read and write operations
         async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
-            click.echo("Reading current BDT state from devices...")
+            with ctx.console.progress_status("Reading current BDT state from devices...") as status:
+                try:
+                    # Read source BBMD
+                    status.update(f"[bold blue]Reading {source}...[/bold blue]")
+                    source_bbmd = await client.read_bdt(source)
+                    ctx.network.bbmds[source] = source_bbmd
 
-            try:
-                # Read source BBMD
-                click.echo(f"  Reading {source}...")
-                source_bbmd = await client.read_bdt(source)
-                ctx.network.bbmds[source] = source_bbmd
+                    # Read target BBMD if bidirectional
+                    if bidirectional:
+                        status.update(f"[bold blue]Reading {target}...[/bold blue]")
+                        target_bbmd = await client.read_bdt(target)
+                        ctx.network.bbmds[target] = target_bbmd
 
-                # Read target BBMD if bidirectional
-                if bidirectional:
-                    click.echo(f"  Reading {target}...")
-                    target_bbmd = await client.read_bdt(target)
-                    ctx.network.bbmds[target] = target_bbmd
-
-            except BBMDClientError as e:
-                raise click.ClickException(f"Failed to read BDT: {e}")
+                except BBMDClientError as e:
+                    raise click.ClickException(f"Failed to read BDT: {e}")
 
             # Build the change plan
             changes = []
@@ -483,7 +451,7 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
                     "removing": target
                 })
             else:
-                click.echo(f"Note: {source} does not have link to {target}")
+                ctx.console.info(f"{source} does not have link to {target}")
 
             # Check target BBMD for bidirectional
             if bidirectional:
@@ -499,30 +467,19 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
                         "removing": source
                     })
                 else:
-                    click.echo(f"Note: {target} does not have link to {source}")
+                    ctx.console.info(f"{target} does not have link to {source}")
 
             if not changes:
-                click.echo("No changes needed - links do not exist.")
+                ctx.console.info("No changes needed - links do not exist.")
                 return
 
             # Display the change plan
-            click.echo(f"\n{'=' * 60}")
-            click.echo("PROPOSED CHANGES")
-            click.echo(f"{'=' * 60}")
-
-            for change in changes:
-                click.echo(f"\nBBMD: {change['bbmd']}")
-                click.echo(f"  Action: Remove entry -> {change['removing']}")
-                click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
-                click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
-
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"Total BBMDs to modify: {len(changes)}")
-            click.echo(f"{'=' * 60}")
+            panel = ctx.formatter.change_plan_panel(changes)
+            ctx.console.print(panel)
 
             if not yes:
-                if not click.confirm("\nProceed with these changes?"):
-                    click.echo("Aborted.")
+                if not ctx.console.confirm("Proceed with these changes?"):
+                    ctx.console.warning("Aborted.")
                     return
 
             # Create snapshot before change
@@ -531,12 +488,12 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
                 ctx.network,
                 f"delete {'bidirectional ' if bidirectional else ''}link {source} -> {target}"
             )
-            click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+            ctx.console.info(f"Created rollback snapshot: {snapshot_id}")
 
             manager = NetworkManager(client, ctx.network)
             try:
-                click.echo("\nApplying changes...")
-                modified = await manager.delete_link(source, target, bidirectional=bidirectional)
+                with ctx.console.progress_status("Applying changes...") as status:
+                    modified = await manager.delete_link(source, target, bidirectional=bidirectional)
 
                 ctx.save_state()
 
@@ -552,10 +509,10 @@ def delete_link(ctx: Context, source: str, target: str, bidirectional: bool, yes
                 )
 
                 for addr in modified:
-                    click.echo(f"  Updated {addr}")
+                    ctx.console.success(f"Updated {addr}")
 
-                click.echo(f"\nSuccess! Modified {len(modified)} BBMD(s).")
-                click.echo(f"To undo: bbmd-manager rewind {snapshot_id}")
+                ctx.console.success(f"Modified {len(modified)} BBMD(s)")
+                ctx.console.info(f"To undo: bbmd-manager rewind {snapshot_id}")
 
             except BBMDClientError as e:
                 raise click.ClickException(str(e))
@@ -595,16 +552,15 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
     async def do_delete_bbmd():
         # Use single client connection for both read and write operations
         async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
-            click.echo("Reading current BDT state from devices...")
-
-            # Read live BDT data from all known BBMDs
-            for bbmd_addr in bbmds_to_read:
-                try:
-                    click.echo(f"  Reading {bbmd_addr}...")
-                    bbmd = await client.read_bdt(bbmd_addr)
-                    ctx.network.bbmds[bbmd_addr] = bbmd
-                except BBMDClientError as e:
-                    click.echo(f"  Warning: Failed to read {bbmd_addr}: {e}")
+            with ctx.console.progress_status("Reading current BDT state from devices...") as status:
+                # Read live BDT data from all known BBMDs
+                for bbmd_addr in bbmds_to_read:
+                    try:
+                        status.update(f"[bold blue]Reading {bbmd_addr}...[/bold blue]")
+                        bbmd = await client.read_bdt(bbmd_addr)
+                        ctx.network.bbmds[bbmd_addr] = bbmd
+                    except BBMDClientError as e:
+                        ctx.console.warning(f"Failed to read {bbmd_addr}: {e}")
 
             if address not in ctx.network.bbmds:
                 raise click.ClickException(f"Could not read BDT from {address}")
@@ -639,41 +595,27 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
                 })
 
             if not changes:
-                click.echo("No changes needed - BBMD has no links to/from other BBMDs.")
+                ctx.console.info("No changes needed - BBMD has no links to/from other BBMDs.")
                 return
 
             # Display the change plan
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"PROPOSED CHANGES - Remove BBMD {address}")
-            click.echo(f"{'=' * 60}")
-
-            for change in changes:
-                click.echo(f"\nBBMD: {change['bbmd']}")
-                if change['action'] == 'clear_bdt':
-                    click.echo(f"  Action: Clear entire BDT")
-                else:
-                    click.echo(f"  Action: Remove entry -> {change['removing']}")
-                click.echo(f"  Current BDT: {', '.join(change['current_bdt'])}")
-                click.echo(f"  New BDT:     {', '.join(change['new_bdt']) or '(empty)'}")
-
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"Total BBMDs to modify: {len(changes)}")
-            click.echo(f"{'=' * 60}")
+            panel = ctx.formatter.change_plan_panel(changes, f"PROPOSED CHANGES - Remove BBMD {address}")
+            ctx.console.print(panel)
 
             if not yes:
-                if not click.confirm("\nProceed with these changes?"):
-                    click.echo("Aborted.")
+                if not ctx.console.confirm("Proceed with these changes?"):
+                    ctx.console.warning("Aborted.")
                     return
 
             # Create snapshot before change
             rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
             snapshot_id = rewind.prepare_change(ctx.network, f"delete BBMD {address}")
-            click.echo(f"\nCreated rollback snapshot: {snapshot_id}")
+            ctx.console.info(f"Created rollback snapshot: {snapshot_id}")
 
             manager = NetworkManager(client, ctx.network)
             try:
-                click.echo("\nApplying changes...")
-                modified = await manager.delete_bbmd(address)
+                with ctx.console.progress_status("Applying changes...") as status:
+                    modified = await manager.delete_bbmd(address)
 
                 ctx.save_state()
 
@@ -685,10 +627,10 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
                 )
 
                 for addr in modified:
-                    click.echo(f"  Updated {addr}")
+                    ctx.console.success(f"Updated {addr}")
 
-                click.echo(f"\nSuccess! Modified {len(modified)} BBMD(s).")
-                click.echo(f"To undo: bbmd-manager rewind {snapshot_id}")
+                ctx.console.success(f"Modified {len(modified)} BBMD(s)")
+                ctx.console.info(f"To undo: bbmd-manager rewind {snapshot_id}")
 
             except BBMDClientError as e:
                 raise click.ClickException(str(e))
@@ -717,20 +659,11 @@ def audit(ctx: Context, limit: int, action_filter: Optional[str], bbmd_filter: O
     entries = ctx.audit_log.get_entries(limit=limit, action_filter=action_filter, bbmd_filter=bbmd_filter)
 
     if not entries:
-        click.echo("No audit log entries found.")
+        ctx.console.empty_state("No audit log entries found.")
         return
 
-    click.echo(f"\nAudit Log (showing {len(entries)} entries)")
-    click.echo("=" * 80)
-
-    for entry in entries:
-        ts = entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        click.echo(f"\n[{ts}] {entry.action}")
-        click.echo(f"  BBMD: {entry.bbmd_address}")
-        for key, value in entry.details.items():
-            click.echo(f"  {key}: {value}")
-        if entry.snapshot_id:
-            click.echo(f"  Snapshot: {entry.snapshot_id}")
+    table = ctx.formatter.audit_table(entries)
+    ctx.console.print(table)
 
 
 @cli.command()
@@ -746,19 +679,11 @@ def snapshots(ctx: Context, limit: int):
     snapshot_list = ctx.snapshot_manager.list(limit=limit)
 
     if not snapshot_list:
-        click.echo("No snapshots available.")
+        ctx.console.empty_state("No snapshots available.")
         return
 
-    click.echo(f"\nAvailable Snapshots ({len(snapshot_list)} shown)")
-    click.echo("=" * 80)
-
-    for snapshot in snapshot_list:
-        ts = snapshot.timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        bbmd_count = len(snapshot.network_state.bbmds)
-        click.echo(f"\n{snapshot.id}")
-        click.echo(f"  Created: {ts}")
-        click.echo(f"  Description: {snapshot.description}")
-        click.echo(f"  BBMDs in snapshot: {bbmd_count}")
+    table = ctx.formatter.snapshot_table(snapshot_list)
+    ctx.console.print(table)
 
 
 @cli.command()
@@ -775,30 +700,8 @@ def diff(ctx: Context, snapshot_id: str):
     if "error" in diff_result:
         raise click.ClickException(diff_result["error"])
 
-    click.echo(f"\nDifference: {snapshot_id} -> current state")
-    click.echo("=" * 60)
-
-    if diff_result["added_bbmds"]:
-        click.echo("\nAdded BBMDs:")
-        for addr in diff_result["added_bbmds"]:
-            click.echo(f"  + {addr}")
-
-    if diff_result["removed_bbmds"]:
-        click.echo("\nRemoved BBMDs:")
-        for addr in diff_result["removed_bbmds"]:
-            click.echo(f"  - {addr}")
-
-    if diff_result["modified_bbmds"]:
-        click.echo("\nModified BBMDs:")
-        for mod in diff_result["modified_bbmds"]:
-            click.echo(f"\n  {mod['address']}:")
-            for added in mod["added_links"]:
-                click.echo(f"    + link to {added}")
-            for removed in mod["removed_links"]:
-                click.echo(f"    - link to {removed}")
-
-    if not any([diff_result["added_bbmds"], diff_result["removed_bbmds"], diff_result["modified_bbmds"]]):
-        click.echo("\nNo differences found.")
+    panel = ctx.formatter.diff_panel(diff_result, snapshot_id)
+    ctx.console.print(panel)
 
 
 @cli.command()
@@ -826,25 +729,19 @@ def rewind(ctx: Context, snapshot_id: str, yes: bool, dry_run: bool):
     plan = rewind_mgr.get_rewind_plan(snapshot_id, ctx.network)
 
     if not plan:
-        click.echo("No changes needed - current state matches snapshot.")
+        ctx.console.info("No changes needed - current state matches snapshot.")
         return
 
-    click.echo(f"\nRewind Plan to: {snapshot_id}")
-    click.echo(f"Description: {snapshot.description}")
-    click.echo("=" * 60)
-
-    for op in plan:
-        click.echo(f"\n{op['bbmd']}:")
-        click.echo(f"  Current BDT: {', '.join(op['current_bdt']) or '(empty)'}")
-        click.echo(f"  Target BDT:  {', '.join(op['target_bdt']) or '(empty)'}")
+    panel = ctx.formatter.rewind_plan_panel(plan, snapshot_id, snapshot.description)
+    ctx.console.print(panel)
 
     if dry_run:
-        click.echo("\n[DRY RUN] No changes made.")
+        ctx.console.warning("[DRY RUN] No changes made.")
         return
 
     if not yes:
-        if not click.confirm("\nProceed with rewind?"):
-            click.echo("Aborted.")
+        if not ctx.console.confirm("Proceed with rewind?"):
+            ctx.console.warning("Aborted.")
             return
 
     # Create snapshot of current state before rewind
@@ -854,21 +751,22 @@ def rewind(ctx: Context, snapshot_id: str, yes: bool, dry_run: bool):
     )
 
     async def do_rewind():
-        click.echo(f"\nCreated pre-rewind snapshot: {pre_rewind_snapshot}")
-        click.echo("Applying rewind...")
+        ctx.console.info(f"Created pre-rewind snapshot: {pre_rewind_snapshot}")
 
         async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
             manager = NetworkManager(client, ctx.network)
             errors = []
 
-            for op in plan:
-                try:
-                    entries = [BDTEntry(address=addr) for addr in op['target_bdt']]
-                    await manager.set_bdt(op['bbmd'], entries)
-                    click.echo(f"  Restored {op['bbmd']}")
-                except BBMDClientError as e:
-                    errors.append(f"{op['bbmd']}: {e}")
-                    click.echo(f"  FAILED {op['bbmd']}: {e}")
+            with ctx.console.progress_status("Applying rewind...") as status:
+                for op in plan:
+                    try:
+                        status.update(f"[bold blue]Restoring {op['bbmd']}...[/bold blue]")
+                        entries = [BDTEntry(address=addr) for addr in op['target_bdt']]
+                        await manager.set_bdt(op['bbmd'], entries)
+                        ctx.console.success(f"Restored {op['bbmd']}")
+                    except BBMDClientError as e:
+                        errors.append(f"{op['bbmd']}: {e}")
+                        ctx.console.error(f"FAILED {op['bbmd']}: {e}")
 
         ctx.save_state()
 
@@ -884,9 +782,9 @@ def rewind(ctx: Context, snapshot_id: str, yes: bool, dry_run: bool):
         )
 
         if errors:
-            click.echo(f"\nRewind completed with {len(errors)} error(s).")
+            ctx.console.warning(f"Rewind completed with {len(errors)} error(s).")
         else:
-            click.echo("\nRewind completed successfully.")
+            ctx.console.success("Rewind completed successfully.")
 
     asyncio.run(do_rewind())
 
@@ -901,13 +799,13 @@ def rewind(ctx: Context, snapshot_id: str, yes: bool, dry_run: bool):
 def clear_state(ctx: Context, yes: bool):
     """Clear all cached state (does not affect actual BBMDs)."""
     if not yes:
-        if not click.confirm("Clear all cached state?"):
-            click.echo("Aborted.")
+        if not ctx.console.confirm("Clear all cached state?"):
+            ctx.console.warning("Aborted.")
             return
 
     ctx.network = BBMDNetwork()
     ctx.save_state()
-    click.echo("State cleared.")
+    ctx.console.success("State cleared.")
 
 
 @cli.command()
@@ -922,16 +820,16 @@ def clear_history(ctx: Context, clear_all: bool, yes: bool):
         msg = "Clear audit log? (use --all to also clear snapshots)"
 
     if not yes:
-        if not click.confirm(msg):
-            click.echo("Aborted.")
+        if not ctx.console.confirm(msg):
+            ctx.console.warning("Aborted.")
             return
 
     ctx.audit_log.clear()
-    click.echo("Audit log cleared.")
+    ctx.console.success("Audit log cleared.")
 
     if clear_all:
         ctx.snapshot_manager.clear()
-        click.echo("Snapshots cleared.")
+        ctx.console.success("Snapshots cleared.")
 
 
 def main():

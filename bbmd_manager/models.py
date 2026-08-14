@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set
 import json
 
+from .network_port import NetworkPortInfo
+
 
 @dataclass
 class BDTEntry:
@@ -34,12 +36,20 @@ class BBMD:
     address: str  # IP:port format
     bdt: List[BDTEntry] = field(default_factory=list)
     last_read: Optional[datetime] = None
+    device_instance: Optional[int] = None
+    network_ports: List[NetworkPortInfo] = field(default_factory=list)
+    subnet: Optional[str] = None
+    npo_scan_error: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
             "address": self.address,
             "bdt": [e.to_dict() for e in self.bdt],
-            "last_read": self.last_read.isoformat() if self.last_read else None
+            "last_read": self.last_read.isoformat() if self.last_read else None,
+            "device_instance": self.device_instance,
+            "network_ports": [port.to_dict() for port in self.network_ports],
+            "subnet": self.subnet,
+            "npo_scan_error": self.npo_scan_error,
         }
 
     @classmethod
@@ -47,7 +57,13 @@ class BBMD:
         return cls(
             address=data["address"],
             bdt=[BDTEntry.from_dict(e) for e in data.get("bdt", [])],
-            last_read=datetime.fromisoformat(data["last_read"]) if data.get("last_read") else None
+            last_read=datetime.fromisoformat(data["last_read"]) if data.get("last_read") else None,
+            device_instance=data.get("device_instance"),
+            network_ports=[
+                NetworkPortInfo.from_dict(port) for port in data.get("network_ports", [])
+            ],
+            subnet=data.get("subnet"),
+            npo_scan_error=data.get("npo_scan_error"),
         )
 
     def get_peer_addresses(self) -> Set[str]:

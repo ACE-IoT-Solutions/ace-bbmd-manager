@@ -18,6 +18,7 @@ from bacpypes3.ipv4.service import BIPNormal, UDPMultiplexer
 from bacpypes3.ipv4 import IPv4DatagramServer
 
 from .models import BDTEntry, BBMD
+from .network_port import NetworkPortScanner, default_subnet_for_bbmd
 
 
 class BBMDClientError(Exception):
@@ -119,6 +120,7 @@ class BBMDClient:
         self.debug = debug
         self._link_layer = None
         self._ase = None
+        self._npo_scanner = NetworkPortScanner(local_address, timeout=timeout)
 
     def _debug_print(self, msg: str):
         """Print debug message if debug mode is on."""
@@ -154,6 +156,11 @@ class BBMDClient:
         bind(self._ase, self._bip)
 
         self._debug_print("Stack initialized")
+        try:
+            await self._npo_scanner.start()
+        except Exception:
+            await self.stop()
+            raise
 
     async def stop(self):
         """Stop the BACnet communication stack."""
@@ -164,6 +171,7 @@ class BBMDClient:
         self._codec = None
         self._multiplexer = None
         self._ase = None
+        await self._npo_scanner.stop()
 
     async def read_bdt(self, bbmd_address: str) -> BBMD:
         """
@@ -227,11 +235,24 @@ class BBMDClient:
 
         self._debug_print(f"Total BDT entries parsed: {len(bdt_entries)}")
 
-        return BBMD(
+        bbmd = BBMD(
             address=bbmd_address,
             bdt=bdt_entries,
             last_read=datetime.now()
         )
+        try:
+            scan = await self._npo_scanner.scan(bbmd_address)
+            bbmd.device_instance = scan.device_instance
+            bbmd.network_ports = scan.ports
+            bbmd.subnet = (
+                scan.subnet_for_bbmd(bbmd_address)
+                or default_subnet_for_bbmd(bbmd_address)
+            )
+        except Exception as error:
+            bbmd.subnet = default_subnet_for_bbmd(bbmd_address)
+            bbmd.npo_scan_error = str(error)
+            self._debug_print(f"Network Port Object scan failed: {error}")
+        return bbmd
 
     async def write_bdt(self, bbmd_address: str, bdt_entries: List[BDTEntry]) -> bool:
         """

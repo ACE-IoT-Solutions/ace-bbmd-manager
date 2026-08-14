@@ -4,6 +4,7 @@ import pytest
 from datetime import datetime
 
 from bbmd_manager.models import BDTEntry, BBMD, BBMDNetwork, AuditEntry, Snapshot
+from bbmd_manager.network_port import NetworkPortInfo
 
 
 class TestBDTEntry:
@@ -62,6 +63,22 @@ class TestBBMD:
         bbmd = BBMD(address="192.168.1.1:47808", bdt=entries)
 
         assert len(bbmd.bdt) == 2
+
+    def test_network_port_state_round_trip(self):
+        bbmd = BBMD(
+            address="192.168.1.1:47808",
+            device_instance=123,
+            network_ports=[
+                NetworkPortInfo(4, "192.168.1.1", "255.255.255.0")
+            ],
+            subnet="192.168.1.0/24",
+        )
+
+        restored = BBMD.from_dict(bbmd.to_dict())
+
+        assert restored.device_instance == 123
+        assert restored.network_ports == bbmd.network_ports
+        assert restored.subnet == "192.168.1.0/24"
 
     def test_get_peer_addresses(self):
         entries = [

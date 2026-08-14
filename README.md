@@ -9,6 +9,8 @@ A CLI tool for managing BACnet BBMD (BACnet Broadcast Management Device) Broadca
 ## Features
 
 - **Network Discovery**: Walk BBMD networks to discover topology
+- **Broadcast Subnet Discovery**: Enumerate each BBMD device's Network Port
+  Objects and match the port IP to the BBMD endpoint to report its subnet
 - **BDT Management**: Read and write Broadcast Distribution Table entries
 - **Link Operations**: Add or delete links (unidirectional or bidirectional)
 - **Audit Logging**: Full audit trail persisted to JSON
@@ -62,6 +64,13 @@ bbmd-manager links
 
 #### `walk`
 Walk the BBMD network starting from one or more seed addresses. Discovers all reachable BBMDs by following BDT entries.
+
+For each responsive BBMD, the walk also sends a directed Who-Is, enumerates the
+device's Network Port Objects, and reads the matching port's `ipAddress` and
+`ipSubnetMask`. Discovered broadcast subnets are always displayed in canonical
+network/prefix notation (for example, `192.168.10.0/24`). If Network Port
+Objects are unavailable or none matches the BBMD address, the manager retains
+the legacy assumption that the BBMD is broadcasting for its local `/24`.
 
 ```bash
 bbmd-manager -l 192.168.1.100 walk 192.168.1.1
@@ -293,7 +302,7 @@ A container image is available on GitHub Container Registry, built on `python:3.
 docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest
 
 # Or pull a specific version
-docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.5
+docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.6
 ```
 
 ### Running Commands

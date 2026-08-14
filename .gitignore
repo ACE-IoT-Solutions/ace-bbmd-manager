@@ -52,3 +52,5 @@ uv.lock
 .claude-flow/
 .hive-mind/
 .swarm/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
