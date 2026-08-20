@@ -106,6 +106,7 @@ async def _bdt_read_attaches_matching_npo_subnet():
 
     assert bbmd.device_instance == 123
     assert bbmd.subnet == "192.168.10.0/24"
+    assert bbmd.subnet_verified is True
     assert bbmd.npo_scan_error is None
 
 
@@ -123,6 +124,7 @@ async def _bdt_read_falls_back_to_24_when_npo_scan_fails():
     bbmd = await client.read_bdt("192.168.10.42:47808")
 
     assert bbmd.subnet == "192.168.10.0/24"
+    assert bbmd.subnet_verified is False
     assert bbmd.npo_scan_error == "NPOs unavailable"
 
 
@@ -143,3 +145,7 @@ async def _bdt_read_falls_back_to_24_when_no_npo_matches():
     bbmd = await client.read_bdt("192.168.10.42:47808")
 
     assert bbmd.subnet == "192.168.10.0/24"
+    assert bbmd.subnet_verified is False
+    assert bbmd.npo_scan_error == (
+        "no Network Port Object IP address matched the BBMD address"
+    )

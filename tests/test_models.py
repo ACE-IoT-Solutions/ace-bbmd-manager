@@ -72,6 +72,7 @@ class TestBBMD:
                 NetworkPortInfo(4, "192.168.1.1", "255.255.255.0")
             ],
             subnet="192.168.1.0/24",
+            subnet_verified=True,
         )
 
         restored = BBMD.from_dict(bbmd.to_dict())
@@ -79,6 +80,7 @@ class TestBBMD:
         assert restored.device_instance == 123
         assert restored.network_ports == bbmd.network_ports
         assert restored.subnet == "192.168.1.0/24"
+        assert restored.subnet_verified is True
 
     def test_get_peer_addresses(self):
         entries = [

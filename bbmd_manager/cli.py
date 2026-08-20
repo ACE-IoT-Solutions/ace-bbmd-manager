@@ -213,6 +213,12 @@ def read(ctx: Context, address: str):
 
         table = ctx.formatter.bdt_table(bbmd.bdt, bbmd.address, bbmd.subnet)
         ctx.console.print(table)
+        if bbmd.subnet and not bbmd.subnet_verified:
+            reason = f" ({bbmd.npo_scan_error})" if bbmd.npo_scan_error else ""
+            ctx.console.warning(
+                "Could not verify the BBMD subnet from a Network Port Object"
+                f"{reason}; assuming {bbmd.subnet}"
+            )
 
     asyncio.run(do_read())
 

@@ -280,6 +280,72 @@ class TestReadCommand:
         assert result.exit_code != 0
         assert "local address required" in result.output.lower()
 
+    def test_read_warns_when_subnet_is_assumed(
+        self, runner, state_file, audit_file, snapshot_file
+    ):
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def read_bdt(self, address):
+                return BBMD(
+                    address="192.168.10.42:47808",
+                    subnet="192.168.10.0/24",
+                    subnet_verified=False,
+                    npo_scan_error="NPOs unavailable",
+                )
+
+        with patch("bbmd_manager.cli.BBMDClient", FakeClient):
+            result = runner.invoke(cli, [
+                "--local-address", "192.168.10.5",
+                "--state-file", state_file,
+                "--audit-file", audit_file,
+                "--snapshot-file", snapshot_file,
+                "read", "192.168.10.42",
+            ])
+
+        assert result.exit_code == 0
+        assert "Could not verify the BBMD subnet" in result.output
+        assert "assuming 192.168.10.0/24" in result.output
+
+    def test_read_does_not_warn_when_subnet_is_verified(
+        self, runner, state_file, audit_file, snapshot_file
+    ):
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def read_bdt(self, address):
+                return BBMD(
+                    address="192.168.10.42:47808",
+                    subnet="192.168.10.0/24",
+                    subnet_verified=True,
+                )
+
+        with patch("bbmd_manager.cli.BBMDClient", FakeClient):
+            result = runner.invoke(cli, [
+                "--local-address", "192.168.10.5",
+                "--state-file", state_file,
+                "--audit-file", audit_file,
+                "--snapshot-file", snapshot_file,
+                "read", "192.168.10.42",
+            ])
+
+        assert result.exit_code == 0
+        assert "Could not verify the BBMD subnet" not in result.output
+
 
 class TestWalkCommand:
     def test_walk_requires_local_address(self, runner, state_file, audit_file, snapshot_file):

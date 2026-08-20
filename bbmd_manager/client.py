@@ -244,10 +244,15 @@ class BBMDClient:
             scan = await self._npo_scanner.scan(bbmd_address)
             bbmd.device_instance = scan.device_instance
             bbmd.network_ports = scan.ports
-            bbmd.subnet = (
-                scan.subnet_for_bbmd(bbmd_address)
-                or default_subnet_for_bbmd(bbmd_address)
-            )
+            discovered_subnet = scan.subnet_for_bbmd(bbmd_address)
+            if discovered_subnet:
+                bbmd.subnet = discovered_subnet
+                bbmd.subnet_verified = True
+            else:
+                bbmd.subnet = default_subnet_for_bbmd(bbmd_address)
+                bbmd.npo_scan_error = (
+                    "no Network Port Object IP address matched the BBMD address"
+                )
         except Exception as error:
             bbmd.subnet = default_subnet_for_bbmd(bbmd_address)
             bbmd.npo_scan_error = str(error)

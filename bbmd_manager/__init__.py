@@ -1,3 +1,3 @@
 """BBMD Manager - CLI tool for managing BACnet BBMDs and their BDTs."""
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"

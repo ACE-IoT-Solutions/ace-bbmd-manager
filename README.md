@@ -70,7 +70,9 @@ device's Network Port Objects, and reads the matching port's `ipAddress` and
 `ipSubnetMask`. Discovered broadcast subnets are always displayed in canonical
 network/prefix notation (for example, `192.168.10.0/24`). If Network Port
 Objects are unavailable or none matches the BBMD address, the manager retains
-the legacy assumption that the BBMD is broadcasting for its local `/24`.
+the legacy assumption that the BBMD is broadcasting for its local `/24`. The
+`read` command prints a warning whenever this fallback is used so an assumed
+subnet cannot be mistaken for one verified from a Network Port Object.
 
 ```bash
 bbmd-manager -l 192.168.1.100 walk 192.168.1.1
@@ -302,7 +304,7 @@ A container image is available on GitHub Container Registry, built on `python:3.
 docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:latest
 
 # Or pull a specific version
-docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.6
+docker pull ghcr.io/ace-iot-solutions/ace-bbmd-manager:0.3.7
 ```
 
 ### Running Commands

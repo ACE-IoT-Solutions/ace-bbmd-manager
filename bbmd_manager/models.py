@@ -39,6 +39,7 @@ class BBMD:
     device_instance: Optional[int] = None
     network_ports: List[NetworkPortInfo] = field(default_factory=list)
     subnet: Optional[str] = None
+    subnet_verified: bool = False
     npo_scan_error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -49,6 +50,7 @@ class BBMD:
             "device_instance": self.device_instance,
             "network_ports": [port.to_dict() for port in self.network_ports],
             "subnet": self.subnet,
+            "subnet_verified": self.subnet_verified,
             "npo_scan_error": self.npo_scan_error,
         }
 
@@ -63,6 +65,7 @@ class BBMD:
                 NetworkPortInfo.from_dict(port) for port in data.get("network_ports", [])
             ],
             subnet=data.get("subnet"),
+            subnet_verified=data.get("subnet_verified", False),
             npo_scan_error=data.get("npo_scan_error"),
         )
 
