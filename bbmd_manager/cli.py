@@ -4,8 +4,7 @@ import asyncio
 import configparser
 import json
 import os
-import sys
-from typing import List, Optional
+from typing import Optional
 
 import click
 
@@ -195,7 +194,7 @@ def read(ctx: Context, address: str):
         raise click.ClickException("Local address required. Use --local-address or set BBMD_LOCAL_ADDRESS")
 
     async def do_read():
-        with ctx.console.progress_status(f"Reading BDT from {address}...") as status:
+        with ctx.console.progress_status(f"Reading BDT from {address}..."):
             async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
                 try:
                     bbmd = await client.read_bdt(address)
@@ -642,6 +641,118 @@ def delete_bbmd(ctx: Context, address: str, yes: bool):
                 raise click.ClickException(str(e))
 
     asyncio.run(do_delete_bbmd())
+
+
+@cli.command('replace')
+@click.argument('existing')
+@click.argument('replacement')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompt')
+@pass_context
+def replace_bbmd(ctx: Context, existing: str, replacement: str, yes: bool):
+    """Replace an existing BBMD with another BBMD on the same subnet.
+
+    The cached state supplies the source BDT, subnet validation, and peers to
+    update.  The replacement is configured first, peers are updated next, and
+    the existing BBMD is cleared last.
+
+    Examples:
+        bbmd-manager replace 192.168.1.10 192.168.1.20
+    """
+    if not ctx.local_address:
+        raise click.ClickException(
+            "Local address required. Use --local-address or set BBMD_LOCAL_ADDRESS"
+        )
+    if not ctx.network.bbmds:
+        raise click.ClickException(
+            "No cached network state. Run 'walk' and 'read' first."
+        )
+
+    if ":" not in existing:
+        existing = f"{existing}:47808"
+    if ":" not in replacement:
+        replacement = f"{replacement}:47808"
+
+    async def do_replace_bbmd():
+        async with BBMDClient(ctx.local_address, debug=ctx.debug) as client:
+            manager = NetworkManager(client, ctx.network)
+            try:
+                plan = manager.replacement_plan(existing, replacement)
+            except ValueError as error:
+                raise click.ClickException(str(error))
+
+            if not plan:
+                ctx.console.info("No changes needed - replacement is already complete.")
+                return
+
+            existing_bbmd = ctx.network.bbmds[existing]
+            replacement_bbmd = ctx.network.bbmds[replacement]
+            if not (
+                existing_bbmd.subnet_verified and replacement_bbmd.subnet_verified
+            ):
+                ctx.console.warning(
+                    f"Subnet equality is based on assumed data "
+                    f"({existing_bbmd.subnet}); verify both BBMDs before proceeding"
+                )
+
+            changes = []
+            for address, entries in plan.items():
+                if address == replacement:
+                    action = "install_replacement"
+                elif address == existing:
+                    action = "clear_bdt"
+                else:
+                    action = "replace_entry"
+                changes.append({
+                    "bbmd": address,
+                    "action": action,
+                    "current_bdt": [
+                        entry.address for entry in ctx.network.bbmds[address].bdt
+                    ],
+                    "new_bdt": [entry.address for entry in entries],
+                    "existing": existing,
+                    "replacement": replacement,
+                })
+
+            panel = ctx.formatter.change_plan_panel(
+                changes,
+                f"PROPOSED CHANGES - Replace {existing} with {replacement}",
+            )
+            ctx.console.print(panel)
+
+            if not yes and not ctx.console.confirm("Proceed with these changes?"):
+                ctx.console.warning("Aborted.")
+                return
+
+            rewind = RewindManager(ctx.audit_log, ctx.snapshot_manager)
+            snapshot_id = rewind.prepare_change(
+                ctx.network, f"replace BBMD {existing} with {replacement}"
+            )
+            ctx.console.info(f"Created rollback snapshot: {snapshot_id}")
+
+            try:
+                with ctx.console.progress_status("Applying replacement..."):
+                    modified = await manager.replace_bbmd(existing, replacement)
+
+                ctx.save_state()
+                ctx.audit_log.log(
+                    action="replace_bbmd",
+                    bbmd_address=existing,
+                    details={
+                        "replacement": replacement,
+                        "subnet": existing_bbmd.subnet,
+                        "modified_bbmds": modified,
+                    },
+                    snapshot_id=snapshot_id,
+                )
+
+                for address in modified:
+                    ctx.console.success(f"Updated {address}")
+                ctx.console.success(f"Modified {len(modified)} BBMD(s)")
+                ctx.console.info(f"To undo: bbmd-manager rewind {snapshot_id}")
+            except BBMDClientError as error:
+                raise click.ClickException(str(error))
+
+    asyncio.run(do_replace_bbmd())
 
 
 # ============================================================================

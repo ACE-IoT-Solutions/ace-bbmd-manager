@@ -137,6 +137,23 @@ Remove a BBMD from the network entirely. This removes it from all other BBMDs' B
 bbmd-manager -l 192.168.1.100 delete-bbmd 192.168.1.3
 ```
 
+#### `replace`
+Replace a BBMD with another cached BBMD on the same subnet. The command copies
+the existing BBMD's BDT to the replacement, rewrites its self-entry, updates
+every cached peer that references the existing address, and clears the existing
+BBMD last. Distribution masks are preserved and duplicate entries are removed.
+
+The replacement is planned entirely from cached state and includes a preview,
+confirmation, rollback snapshot, and audit entry. Run `walk` and `read` first so
+both BBMDs have subnet data.
+
+```bash
+bbmd-manager -l 192.168.10.5 replace 192.168.10.10 192.168.10.20
+
+# Skip confirmation
+bbmd-manager -l 192.168.10.5 replace 192.168.10.10 192.168.10.20 --yes
+```
+
 ### Audit & Rollback
 
 #### `audit`

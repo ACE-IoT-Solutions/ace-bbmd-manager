@@ -1,6 +1,6 @@
 """Rich console output formatting for BBMD Manager CLI."""
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from rich import box
 from rich.console import Console
@@ -203,12 +203,21 @@ class OutputFormatter:
         content = Text()
 
         for change in changes:
-            content.append(f"\nBBMD: ", style="bold")
+            content.append("\nBBMD: ", style="bold")
             content.append(f"{change['bbmd']}\n", style="cyan")
 
             if change.get("action") == "clear_bdt":
                 content.append("  Action: ", style="dim")
                 content.append("Clear entire BDT\n", style="red bold")
+            elif change.get("action") == "install_replacement":
+                content.append("  Action: ", style="dim")
+                content.append("Install copied replacement BDT\n", style="green bold")
+            elif change.get("action") == "replace_entry":
+                content.append("  Action: ", style="dim")
+                content.append(
+                    f"Replace {change['existing']} -> {change['replacement']}\n",
+                    style="yellow",
+                )
             elif change.get("adding"):
                 content.append("  Action: ", style="dim")
                 content.append(f"Add entry -> {change['adding']}\n", style="green")

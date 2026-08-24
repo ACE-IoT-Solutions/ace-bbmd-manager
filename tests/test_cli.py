@@ -4,7 +4,7 @@ import json
 import os
 import pytest
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -386,6 +386,105 @@ class TestDeleteLinkCommand:
         assert "local address required" in result.output.lower()
 
 
+class TestReplaceCommand:
+    def test_replace_uses_cached_state_and_updates_topology(
+        self, runner, state_file, audit_file, snapshot_file
+    ):
+        old = "192.168.10.10:47808"
+        new = "192.168.10.20:47808"
+        peer = "192.168.20.10:47808"
+        network = BBMDNetwork(bbmds={
+            old: BBMD(
+                address=old,
+                subnet="192.168.10.0/24",
+                subnet_verified=True,
+                bdt=[BDTEntry(old), BDTEntry(peer)],
+            ),
+            new: BBMD(
+                address=new,
+                subnet="192.168.10.0/24",
+                subnet_verified=True,
+                bdt=[],
+            ),
+            peer: BBMD(
+                address=peer,
+                subnet="192.168.20.0/24",
+                subnet_verified=True,
+                bdt=[BDTEntry(old)],
+            ),
+        })
+        with open(state_file, "w") as state_handle:
+            json.dump(network.to_dict(), state_handle)
+
+        class FakeClient:
+            writes = []
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def write_bdt(self, address, entries):
+                self.writes.append((address, [entry.address for entry in entries]))
+                return True
+
+        with patch("bbmd_manager.cli.BBMDClient", FakeClient):
+            result = runner.invoke(cli, [
+                "--local-address", "192.168.10.5",
+                "--state-file", state_file,
+                "--audit-file", audit_file,
+                "--snapshot-file", snapshot_file,
+                "replace", old, new, "--yes",
+            ])
+
+        assert result.exit_code == 0
+        assert [address for address, _ in FakeClient.writes] == [new, peer, old]
+        assert "Modified 3 BBMD(s)" in result.output
+        with open(state_file) as state_handle:
+            saved = BBMDNetwork.from_dict(json.load(state_handle))
+        assert saved.bbmds[old].bdt == []
+        assert [entry.address for entry in saved.bbmds[new].bdt] == [new, peer]
+        assert [entry.address for entry in saved.bbmds[peer].bdt] == [new]
+
+    def test_replace_rejects_different_subnets(
+        self, runner, state_file, audit_file, snapshot_file
+    ):
+        old = "192.168.10.10:47808"
+        new = "192.168.11.20:47808"
+        network = BBMDNetwork(bbmds={
+            old: BBMD(address=old, subnet="192.168.10.0/24"),
+            new: BBMD(address=new, subnet="192.168.11.0/24"),
+        })
+        with open(state_file, "w") as state_handle:
+            json.dump(network.to_dict(), state_handle)
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        with patch("bbmd_manager.cli.BBMDClient", FakeClient):
+            result = runner.invoke(cli, [
+                "--local-address", "192.168.10.5",
+                "--state-file", state_file,
+                "--audit-file", audit_file,
+                "--snapshot-file", snapshot_file,
+                "replace", old, new, "--yes",
+            ])
+
+        assert result.exit_code != 0
+        assert "different subnets" in result.output
+
+
 class TestRewindCommand:
     def test_rewind_requires_local_address(self, runner, state_file, audit_file, snapshot_file):
         from bbmd_manager.audit import SnapshotManager
@@ -498,7 +597,7 @@ class TestBACpypesIniIntegration:
 
         # Run with verbose to see the "Using address from BACpypes.ini" message
         # Use isolated filesystem to ensure we're in temp_dir
-        with runner.isolated_filesystem(temp_dir=temp_dir) as td:
+        with runner.isolated_filesystem(temp_dir=temp_dir):
             # Create the INI file in the isolated filesystem
             with open("BACpypes.ini", 'w') as f:
                 f.write("[BACpypes]\n")

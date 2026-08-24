@@ -2,7 +2,8 @@
 
 import asyncio
 from datetime import datetime
-from typing import List, Optional
+import ipaddress
+from typing import List
 
 from bacpypes3.comm import bind, ApplicationServiceElement
 from bacpypes3.pdu import IPv4Address
@@ -24,6 +25,16 @@ from .network_port import NetworkPortScanner, default_subnet_for_bbmd
 class BBMDClientError(Exception):
     """Base exception for BBMD client errors."""
     pass
+
+
+def bdt_entry_address(entry: BDTEntry):
+    """Encode a cached BDT entry without dropping its distribution mask."""
+    address = entry.address
+    if ":" not in address:
+        address = f"{address}:47808"
+    ip, port = address.rsplit(":", 1)
+    prefix = ipaddress.IPv4Network(f"0.0.0.0/{entry.mask}").prefixlen
+    return IPv4Address(f"{ip}/{prefix}:{port}")
 
 
 class BVLLServiceElement(ApplicationServiceElement):
@@ -225,11 +236,15 @@ class BBMDClient:
                 if ":" not in addr_str:
                     addr_str = f"{addr_str}:47808"
                 # bacpypes3 uses IPv4Address which includes mask info
-                mask = getattr(entry, 'addrMask', 0xFFFFFFFF)
-                if isinstance(mask, int):
-                    mask_str = f"{(mask >> 24) & 0xFF}.{(mask >> 16) & 0xFF}.{(mask >> 8) & 0xFF}.{mask & 0xFF}"
+                netmask = getattr(entry, 'netmask', None)
+                if netmask is not None:
+                    mask_str = str(netmask)
                 else:
-                    mask_str = str(mask) if mask else "255.255.255.255"
+                    mask = getattr(entry, 'addrMask', 0xFFFFFFFF)
+                    if isinstance(mask, int):
+                        mask_str = f"{(mask >> 24) & 0xFF}.{(mask >> 16) & 0xFF}.{(mask >> 8) & 0xFF}.{mask & 0xFF}"
+                    else:
+                        mask_str = str(mask) if mask else "255.255.255.255"
                 bdt_entries.append(BDTEntry(address=addr_str, mask=mask_str))
                 self._debug_print(f"    Parsed: {addr_str} mask {mask_str}")
 
@@ -282,7 +297,7 @@ class BBMDClient:
         # Build the BDT list
         bdt = []
         for entry in bdt_entries:
-            bdt.append(IPv4Address(entry.address))
+            bdt.append(bdt_entry_address(entry))
 
         dest_addr = IPv4Address(bbmd_address)
         request = WriteBroadcastDistributionTable(destination=dest_addr, bdt=bdt)
